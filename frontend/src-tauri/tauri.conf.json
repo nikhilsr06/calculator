@@ -16,7 +16,7 @@
       "shell": { "all": false },
       "http": {
         "all": true,
-        "scope": ["http://localhost:4000/*", "https://*/*"]
+        "scope": ["http://localhost:4000/**", "https://**"]
       }
     },
     "bundle": {

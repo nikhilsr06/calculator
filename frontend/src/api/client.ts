@@ -12,8 +12,14 @@ function getToken(): string | null {
   return sessionStorage.getItem("formula_calc_token");
 }
 
+declare global {
+  interface Window {
+    __TAURI_IPC__?: (cmd: unknown) => void;
+  }
+}
+
 function isTauri(): boolean {
-  return typeof window !== "undefined" && "__TAURI__" in window;
+  return typeof window.__TAURI_IPC__ === "function";
 }
 
 function errorFromBody(body: unknown, status: number): string {
