@@ -1,4 +1,5 @@
-# formula-calc-2
+# formula-calc
+
 
 Full implementation of the spec: a black-box calculation engine where employees
 get inputs → results only, and administrators manage formulas through a secure
