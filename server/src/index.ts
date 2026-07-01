@@ -13,10 +13,19 @@ const app = express();
 
 const allowedOrigins = (process.env.CORS_ORIGIN || "").split(",").map((s) => s.trim()).filter(Boolean);
 
+function isAllowedOrigin(origin: string | undefined): boolean {
+  if (!origin) return true;
+  if (allowedOrigins.includes(origin)) return true;
+  // Packaged Tauri desktop apps use these origins, not localhost:1420.
+  if (origin.startsWith("tauri://")) return true;
+  if (origin.endsWith("tauri.localhost")) return true;
+  return false;
+}
+
 app.use(helmet());
 app.use(
   cors({
-    origin: allowedOrigins.length > 0 ? allowedOrigins : true,
+    origin: allowedOrigins.length > 0 ? isAllowedOrigin : true,
     credentials: true,
   })
 );

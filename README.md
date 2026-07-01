@@ -87,6 +87,9 @@ Desktop App → Render (backend) → Supabase Postgres
 ```
 
 To deploy the backend to Render: build with `npm run build`, start with
-`npm run start`, and set the same environment variables as `.env.example`.
+`npm run start`, and set the same environment variables as `server/.env`.
+Set `CORS_ORIGIN` to your frontend dev URL (e.g. `http://localhost:1420`).
+The packaged Tauri desktop app uses `tauri://localhost` / `https://tauri.localhost`
+origins, which the server allows automatically — no extra CORS config needed.
 No code changes are needed to later migrate to an internal server with local
 Postgres — only `DATABASE_URL`/`DATABASE_SSL` change.
