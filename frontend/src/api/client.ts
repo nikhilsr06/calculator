@@ -12,6 +12,20 @@ function getToken(): string | null {
   return sessionStorage.getItem("formula_calc_token");
 }
 
+function isTauri(): boolean {
+  return typeof window !== "undefined" && "__TAURI__" in window;
+}
+
+function errorFromBody(body: unknown, status: number): string {
+  let message = `Request failed (${status})`;
+  if (body && typeof body === "object" && "error" in body) {
+    const err = (body as { error: unknown }).error;
+    if (typeof err === "string") message = err;
+    else if (err !== undefined) message = JSON.stringify(err);
+  }
+  return message;
+}
+
 async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const token = getToken();
   const headers: Record<string, string> = {
@@ -20,15 +34,41 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   };
   if (token) headers["Authorization"] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const url = `${API_BASE}${path}`;
+
+  if (isTauri()) {
+    const { fetch: tauriFetch, Body, ResponseType } = await import("@tauri-apps/api/http");
+    const res = await tauriFetch<string>(url, {
+      method: (options.method || "GET") as "GET" | "POST" | "PUT" | "DELETE",
+      headers,
+      body: options.body ? Body.text(String(options.body)) : undefined,
+      responseType: ResponseType.Text,
+    });
+
+    if (res.status >= 400) {
+      let body: unknown = res.data;
+      try {
+        body = JSON.parse(res.data);
+      } catch {
+        // keep raw text
+      }
+      throw new Error(errorFromBody(body, res.status));
+    }
+    if (res.status === 204 || !res.data) return undefined as T;
+    return JSON.parse(res.data) as T;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, { ...options, headers });
+  } catch {
+    throw new Error("Cannot reach the server. Check your network connection.");
+  }
 
   if (!res.ok) {
     let message = `Request failed (${res.status})`;
     try {
-      const body = await res.json();
-      if (body?.error) {
-        message = typeof body.error === "string" ? body.error : JSON.stringify(body.error);
-      }
+      message = errorFromBody(await res.json(), res.status);
     } catch {
       // ignore parse errors, use default message
     }

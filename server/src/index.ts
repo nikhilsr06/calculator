@@ -22,10 +22,20 @@ function isAllowedOrigin(origin: string | undefined): boolean {
   return false;
 }
 
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" },
+  })
+);
 app.use(
   cors({
-    origin: allowedOrigins.length > 0 ? isAllowedOrigin : true,
+    origin: (origin, callback) => {
+      if (allowedOrigins.length === 0 || isAllowedOrigin(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
   })
 );
