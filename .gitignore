@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.env
+*.log
+server/dist/
+frontend/dist/
+frontend/.vite/
+frontend/src-tauri/target/
