@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router-dom";
-import { Layout } from "../components/Layout";
+import { Link, useParams } from "react-router-dom";
 import { api } from "../api/client";
 
 interface FormulaVersion {
@@ -52,8 +51,14 @@ export default function AdminCalculatorDetailPage() {
   };
 
   return (
-    <Layout>
-      <h1 className="text-lg font-semibold text-slate-900 mb-6">Formula Versions</h1>
+    <>
+      <Link
+        to="/admin/calculators"
+        className="inline-block text-sm text-brand-600 hover:text-brand-700 mb-4"
+      >
+        ← Back to calculators
+      </Link>
+      <h2 className="text-base font-semibold text-slate-900 mb-6">Formula Versions</h2>
 
       <div className="bg-white border border-slate-200 rounded-lg p-5 mb-6">
         <label className="block text-sm font-medium text-slate-700 mb-1">New expression</label>
@@ -110,6 +115,6 @@ export default function AdminCalculatorDetailPage() {
           </div>
         ))}
       </div>
-    </Layout>
+    </>
   );
 }

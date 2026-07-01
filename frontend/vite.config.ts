@@ -1,10 +1,17 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
 
 // Tauri expects a fixed dev server port and works best with relative paths.
 export default defineConfig({
   plugins: [react()],
   clearScreen: false,
+  css: {
+    postcss: {
+      plugins: [tailwindcss(), autoprefixer()],
+    },
+  },
   server: {
     port: 1420,
     strictPort: true,

@@ -21,14 +21,9 @@ export function Layout({ children }: { children: React.ReactNode }) {
                 History
               </Link>
               {user.role === "administrator" && (
-                <>
-                  <Link to="/admin" className="text-slate-600 hover:text-slate-900">
-                    Admin
-                  </Link>
-                  <Link to="/admin/users" className="text-slate-600 hover:text-slate-900">
-                    Users
-                  </Link>
-                </>
+                <Link to="/admin" className="text-slate-600 hover:text-slate-900">
+                  Admin
+                </Link>
               )}
               <span className="text-slate-400">|</span>
               <span className="text-slate-500">{user.email}</span>

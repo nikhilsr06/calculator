@@ -26,7 +26,7 @@ export default function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-slate-50">
       <div className="w-full max-w-sm bg-white border border-slate-200 rounded-xl shadow-sm p-8">
         <h1 className="text-xl font-semibold text-slate-900 mb-1">Sign in</h1>
-        <p className="text-sm text-slate-500 mb-6">Engineering Formula Calculator System</p>
+        <p className="text-sm text-slate-500 mb-6">Calculator for GE TEK</p>
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-slate-700 mb-1">Email</label>

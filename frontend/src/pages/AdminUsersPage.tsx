@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Layout } from "../components/Layout";
 import { api, Role } from "../api/client";
 import { useAuth } from "../context/AuthContext";
 
@@ -62,9 +61,8 @@ export default function AdminUsersPage() {
   };
 
   return (
-    <Layout>
-      <div className="flex items-center justify-between mb-6">
-        <h1 className="text-lg font-semibold text-slate-900">Admin · Users</h1>
+    <>
+      <div className="flex items-center justify-end mb-6">
         <button
           onClick={() => setShowCreate((s) => !s)}
           className="rounded-md bg-brand-600 text-white text-sm font-medium px-4 py-2 hover:bg-brand-700"
@@ -149,6 +147,6 @@ export default function AdminUsersPage() {
           </div>
         ))}
       </div>
-    </Layout>
+    </>
   );
 }
