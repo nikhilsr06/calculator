@@ -33,8 +33,8 @@ export default function AdminDashboardPage() {
     setLoading(true);
     Promise.all([api.adminListCategories(), api.adminListCalculators()])
       .then(([catRes, calcRes]) => {
-        setCategories(catRes.categories);
-        setCalculators(calcRes.calculators);
+        setCategories(catRes.categories ?? []);
+        setCalculators(calcRes.calculators ?? []);
         setError(null);
       })
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))

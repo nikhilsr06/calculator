@@ -76,15 +76,17 @@ export default function CalculatorListPage() {
     api
       .listCalculators()
       .then((res) => {
-        setCategories(res.categories);
-        setUncategorized(res.uncategorized);
+        setCategories(res.categories ?? []);
+        setUncategorized(res.uncategorized ?? []);
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
   }, []);
 
   const totalCount = useMemo(
-    () => categories.reduce((sum, c) => sum + c.calculators.length, 0) + uncategorized.length,
+    () =>
+      categories.reduce((sum, c) => sum + (c.calculators?.length ?? 0), 0) +
+      (uncategorized?.length ?? 0),
     [categories, uncategorized]
   );
 

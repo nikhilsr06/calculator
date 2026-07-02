@@ -40,21 +40,32 @@ export interface FormulaValidationResult {
 // engineering variable names (e.g. current, voltage).
 const MATH_CONSTANTS = new Set(["pi", "PI", "tau", "Infinity", "NaN", "true", "false"]);
 
-function extractVariables(node: ReturnType<typeof math.parse>): string[] {
+// Minimal AST shape from mathjs parse(); avoids brittle ReturnType<typeof math.parse>.
+interface FormulaAstNode {
+  type: string;
+  fn?: { type?: string; name?: string };
+  name?: string;
+}
+
+interface ParsedFormulaNode {
+  type: string;
+  traverse(callback: (node: FormulaAstNode) => void): void;
+  evaluate(scope: Record<string, number>): unknown;
+}
+
+function extractVariables(node: ParsedFormulaNode): string[] {
   const symbols = new Set<string>();
   const functionNames = new Set<string>();
 
   node.traverse((n) => {
     if (n.type === "FunctionNode") {
-      // @ts-expect-error mathjs node typing
       const fn = n.fn;
       if (fn?.type === "SymbolNode" && fn.name) {
-        functionNames.add(fn.name as string);
+        functionNames.add(fn.name);
       }
     }
     if (n.type === "SymbolNode") {
-      // @ts-expect-error mathjs node typing
-      const name = n.name as string;
+      const name = n.name;
       if (name) symbols.add(name);
     }
   });
@@ -78,7 +89,7 @@ export function validateFormula(expression: string): FormulaValidationResult {
   }
 
   try {
-    const node = math.parse(expression);
+    const node = math.parse(expression) as ParsedFormulaNode;
 
     // Reject assignment / function-definition nodes - formulas should be
     // pure expressions, e.g. "Vp / ratio", not "x = ..." or "f(x) = ...".
@@ -103,7 +114,7 @@ export function validateFormula(expression: string): FormulaValidationResult {
  * Throws on invalid expressions or missing/extra variables.
  */
 export function evaluateFormula(expression: string, inputs: Record<string, number>): number {
-  const node = math.parse(expression);
+  const node = math.parse(expression) as ParsedFormulaNode;
 
   // Re-check for disallowed constructs at evaluation time too (defense in depth).
   let rejected: string | null = null;

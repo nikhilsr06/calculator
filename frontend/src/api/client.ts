@@ -127,16 +127,34 @@ export const api = {
     }),
 
   // Employee endpoints
-  listCalculators: () =>
-    request<{
-      categories: {
+  listCalculators: async () => {
+    const res = await request<{
+      categories?: {
         id: string;
         name: string;
         display_order: number;
-        calculators: EmployeeCalculator[];
+        calculators?: EmployeeCalculator[];
       }[];
-      uncategorized: EmployeeCalculator[];
-    }>("/api/calculators"),
+      uncategorized?: EmployeeCalculator[];
+      calculators?: EmployeeCalculator[];
+    }>("/api/calculators");
+
+    if (Array.isArray(res.categories) || Array.isArray(res.uncategorized)) {
+      return {
+        categories: (res.categories ?? []).map((cat) => ({
+          ...cat,
+          calculators: cat.calculators ?? [],
+        })),
+        uncategorized: res.uncategorized ?? [],
+      };
+    }
+
+    // Backward compatibility with older API responses.
+    return {
+      categories: [],
+      uncategorized: res.calculators ?? [],
+    };
+  },
   getCalculator: (id: string) =>
     request<{
       calculator: { id: string; name: string; description: string | null; result_unit: string | null };
