@@ -3,23 +3,45 @@ import { z } from "zod";
 import { pool } from "../db/pool";
 import { requireAuth } from "../middleware/auth";
 import { evaluateFormula } from "../services/formulaEngine";
+import { syncFormulaInputs } from "../services/syncFormulaInputs";
 
 const router = Router();
 router.use(requireAuth);
 
 /**
- * List active calculators. Note: we SELECT only id/name/description -
- * the formula expression column is never touched by this query, so it
- * cannot accidentally leak even if someone changes the response shape later.
+ * List active calculators, grouped by category for display. Note: we SELECT
+ * only id/name/description/result_unit - the formula expression column is
+ * never touched by this query, so it cannot accidentally leak even if
+ * someone changes the response shape later.
  */
 router.get("/calculators", async (req, res) => {
-  const result = await pool.query(
-    `select id, name, description
+  const categoriesResult = await pool.query(
+    `select id, name, display_order from categories order by display_order asc, name asc`
+  );
+  const calculatorsResult = await pool.query(
+    `select id, name, description, result_unit, category_id, display_order
      from calculators
      where active = true
-     order by name asc`
+     order by display_order asc, name asc`
   );
-  res.json({ calculators: result.rows });
+
+  const byCategory = new Map<string, typeof calculatorsResult.rows>();
+  const uncategorized: typeof calculatorsResult.rows = [];
+  for (const calc of calculatorsResult.rows) {
+    if (calc.category_id) {
+      const bucket = byCategory.get(calc.category_id) ?? [];
+      bucket.push(calc);
+      byCategory.set(calc.category_id, bucket);
+    } else {
+      uncategorized.push(calc);
+    }
+  }
+
+  const categories = categoriesResult.rows
+    .map((cat) => ({ ...cat, calculators: byCategory.get(cat.id) ?? [] }))
+    .filter((cat) => cat.calculators.length > 0);
+
+  res.json({ categories, uncategorized });
 });
 
 /**
@@ -29,25 +51,45 @@ router.get("/calculators/:id", async (req, res) => {
   const { id } = req.params;
 
   const calcResult = await pool.query(
-    `select id, name, description from calculators where id = $1 and active = true`,
+    `select id, name, description, result_unit from calculators where id = $1 and active = true`,
     [id]
   );
   if (calcResult.rowCount === 0) {
     return res.status(404).json({ error: "Calculator not found" });
   }
 
-  const inputsResult = await pool.query(
-    `select id, name, label, type, required, display_order
-     from formula_inputs
-     where calculator_id = $1
-     order by display_order asc`,
-    [id]
-  );
+  const client = await pool.connect();
+  try {
+    await client.query("begin");
 
-  res.json({
-    calculator: calcResult.rows[0],
-    inputs: inputsResult.rows,
-  });
+    const versionResult = await client.query(
+      `select expression from formula_versions where calculator_id = $1 and active = true`,
+      [id]
+    );
+    if (versionResult.rowCount && versionResult.rowCount > 0) {
+      await syncFormulaInputs(client, id, versionResult.rows[0].expression as string);
+    }
+
+    const inputsResult = await client.query(
+      `select id, name, label, type, required, display_order, unit
+       from formula_inputs
+       where calculator_id = $1
+       order by display_order asc`,
+      [id]
+    );
+
+    await client.query("commit");
+
+    res.json({
+      calculator: calcResult.rows[0],
+      inputs: inputsResult.rows,
+    });
+  } catch (err) {
+    await client.query("rollback");
+    res.status(500).json({ error: "Failed to load calculator" });
+  } finally {
+    client.release();
+  }
 });
 
 const calculateSchema = z.object({

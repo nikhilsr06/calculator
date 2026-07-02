@@ -1,303 +1,336 @@
-import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
-import { api } from "../api/client";
+import { useEffect, useMemo, useState } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
+import { api, type AdminCalculator, type Category } from "../api/client";
+import { CreateCalculatorWizard } from "../components/CreateCalculatorWizard";
+import { SortableCategorySection } from "../components/SortableCategorySection";
+import { SortableCalculatorRow } from "../components/SortableCalculatorRow";
 
-interface Calculator {
-  id: string;
-  name: string;
-  description: string | null;
-  active: boolean;
-  created_at: string;
-}
-
-interface InputRow {
-  name: string;
-  label: string;
-  type: "number" | "text";
-  required: boolean;
-}
-
-const emptyInput = (): InputRow => ({ name: "", label: "", type: "number", required: true });
+const UNCATEGORIZED = "__uncategorized__";
 
 export default function AdminDashboardPage() {
-  const [calculators, setCalculators] = useState<Calculator[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
+  const [calculators, setCalculators] = useState<AdminCalculator[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [showCreate, setShowCreate] = useState(false);
 
-  // form state
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [inputs, setInputs] = useState<InputRow[]>([emptyInput()]);
-  const [expression, setExpression] = useState("");
-  const [creating, setCreating] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardDefaultCategory, setWizardDefaultCategory] = useState<string | null>(null);
+
+  const [addingCategory, setAddingCategory] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
 
   const load = () => {
     setLoading(true);
-    api
-      .adminListCalculators()
-      .then((res) => setCalculators(res.calculators))
-      .catch((err) => setError(err.message))
+    Promise.all([api.adminListCategories(), api.adminListCalculators()])
+      .then(([catRes, calcRes]) => {
+        setCategories(catRes.categories);
+        setCalculators(calcRes.calculators);
+        setError(null);
+      })
+      .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
   };
 
   useEffect(load, []);
 
-  const addInputRow = () => setInputs((prev) => [...prev, emptyInput()]);
+  const orderedCategories = useMemo(
+    () => [...categories].sort((a, b) => a.display_order - b.display_order),
+    [categories]
+  );
 
-  const updateInputRow = (idx: number, field: keyof InputRow, value: string | boolean) =>
-    setInputs((prev) => prev.map((row, i) => (i === idx ? { ...row, [field]: value } : row)));
+  const byContainer = useMemo(() => {
+    const map: Record<string, AdminCalculator[]> = { [UNCATEGORIZED]: [] };
+    for (const cat of orderedCategories) map[cat.id] = [];
+    for (const calc of calculators) {
+      const key = calc.category_id ?? UNCATEGORIZED;
+      (map[key] ??= []).push(calc);
+    }
+    for (const key of Object.keys(map)) {
+      map[key].sort((a, b) => a.display_order - b.display_order);
+    }
+    return map;
+  }, [orderedCategories, calculators]);
 
-  const removeInputRow = (idx: number) =>
-    setInputs((prev) => prev.filter((_, i) => i !== idx));
-
-  const resetForm = () => {
-    setName("");
-    setDescription("");
-    setInputs([emptyInput()]);
-    setExpression("");
-    setError(null);
+  const applyOptimisticOrder = (containerId: string, orderedIds: string[]) => {
+    const categoryIdValue = containerId === UNCATEGORIZED ? null : containerId;
+    setCalculators((prev) => {
+      const orderMap = new Map(orderedIds.map((id, idx) => [id, idx]));
+      return prev.map((c) =>
+        orderMap.has(c.id) ? { ...c, category_id: categoryIdValue, display_order: orderMap.get(c.id)! } : c
+      );
+    });
   };
 
-  const handleCreate = async (publish: boolean) => {
-    setError(null);
-    setCreating(true);
-    try {
-      const validInputs = inputs
-        .filter((row) => row.name.trim() && row.label.trim())
-        .map((row, i) => ({ ...row, display_order: i }));
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const type = active.data.current?.type;
 
-      await api.adminCreateCalculator({
-        name: name.trim(),
-        description: description.trim() || undefined,
-        inputs: validInputs,
-        expression: expression.trim() || undefined,
-        publish,
+    if (type === "category") {
+      const ids = orderedCategories.map((c) => c.id);
+      const oldIndex = ids.indexOf(active.id as string);
+      const newIndex = ids.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const newOrder = arrayMove(ids, oldIndex, newIndex);
+      setCategories((prev) => {
+        const byId = new Map(prev.map((c) => [c.id, c]));
+        return newOrder.map((id, idx) => ({ ...byId.get(id)!, display_order: idx }));
       });
+      api.adminReorderCategories(newOrder).catch(load);
+      return;
+    }
 
-      resetForm();
-      setShowCreate(false);
-      load();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to create calculator");
-    } finally {
-      setCreating(false);
+    if (type === "calculator") {
+      const containerId = active.data.current?.containerId as string;
+      const items = byContainer[containerId]?.map((c) => c.id) ?? [];
+      const oldIndex = items.indexOf(active.id as string);
+      const newIndex = items.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return;
+      const newOrder = arrayMove(items, oldIndex, newIndex);
+      applyOptimisticOrder(containerId, newOrder);
+      const categoryIdParam = containerId === UNCATEGORIZED ? null : containerId;
+      api.adminReorderCalculators(categoryIdParam, newOrder).catch(load);
     }
   };
 
-  const toggleActive = async (calc: Calculator) => {
+  const handleAddCategory = async () => {
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) {
+      setAddingCategory(false);
+      return;
+    }
+    try {
+      await api.adminCreateCategory(trimmed);
+      setNewCategoryName("");
+      setAddingCategory(false);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to create category");
+    }
+  };
+
+  const handleRenameCategory = async (id: string, name: string) => {
+    try {
+      await api.adminUpdateCategory(id, name);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to rename category");
+    }
+  };
+
+  const handleDeleteCategory = async (category: Category) => {
+    if (
+      !confirm(
+        `Delete category "${category.name}"? Its calculators will move to Uncategorized.`
+      )
+    )
+      return;
+    try {
+      await api.adminDeleteCategory(category.id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete category");
+    }
+  };
+
+  const handleToggleActive = async (calc: AdminCalculator) => {
     await api.adminUpdateCalculator(calc.id, { active: !calc.active });
     load();
   };
 
-  const handleDelete = async (calc: Calculator) => {
+  const handleDeleteCalculator = async (calc: AdminCalculator) => {
     if (!confirm(`Delete "${calc.name}"? This cannot be undone.`)) return;
-    await api.adminDeleteCalculator(calc.id);
-    load();
+    try {
+      await api.adminDeleteCalculator(calc.id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete calculator");
+    }
   };
+
+  const handleMoveCalculator = async (calc: AdminCalculator, categoryId: string | null) => {
+    try {
+      await api.adminUpdateCalculator(calc.id, { category_id: categoryId });
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to move calculator");
+    }
+  };
+
+  const openWizard = (defaultCategoryId: string | null = null) => {
+    setWizardDefaultCategory(defaultCategoryId);
+    setShowWizard(true);
+  };
+
+  const uncategorized = byContainer[UNCATEGORIZED] ?? [];
+  const [uncategorizedCollapsed, setUncategorizedCollapsed] = useState(false);
 
   return (
     <>
-      <div className="flex items-center justify-end mb-6">
+      <div className="flex items-center justify-between mb-5 gap-2">
+        <div className="flex items-center gap-2">
+          {addingCategory ? (
+            <>
+              <input
+                autoFocus
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAddCategory()}
+                placeholder="Category name"
+                className="rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+              />
+              <button
+                onClick={handleAddCategory}
+                className="rounded-md bg-brand-600 text-white text-sm font-medium px-3 py-1.5 hover:bg-brand-700"
+              >
+                Save
+              </button>
+              <button
+                onClick={() => {
+                  setAddingCategory(false);
+                  setNewCategoryName("");
+                }}
+                className="text-sm text-slate-500 hover:text-slate-700 px-2"
+              >
+                Cancel
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setAddingCategory(true)}
+              className="rounded-md border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 hover:bg-slate-50"
+            >
+              + New Category
+            </button>
+          )}
+        </div>
         <button
-          onClick={() => { setShowCreate((s) => !s); resetForm(); }}
+          onClick={() => openWizard(null)}
           className="rounded-md bg-brand-600 text-white text-sm font-medium px-4 py-2 hover:bg-brand-700"
         >
-          {showCreate ? "Cancel" : "New Calculator"}
+          + New Calculator
         </button>
       </div>
 
-      {/* ── Create form ─────────────────────────────────────────── */}
-      {showCreate && (
-        <div className="bg-white border border-slate-200 rounded-lg p-6 mb-8 space-y-6">
+      {loading && <p className="text-sm text-slate-500">Loading...</p>}
+      {error && <p className="text-sm text-red-600 mb-4">{error}</p>}
 
-          {/* Basic info */}
-          <div className="grid sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">
-                Name <span className="text-red-500">*</span>
-              </label>
-              <input
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Name"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Description</label>
-              <input
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Optional short description"
-                className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
-              />
-            </div>
-          </div>
-
-          {/* Input fields */}
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-sm font-medium text-slate-700">Input Fields</label>
-              <button
-                onClick={addInputRow}
-                className="text-xs text-brand-600 hover:text-brand-700 font-medium"
-              >
-                + Add field
-              </button>
-            </div>
-
-            <div className="rounded-md border border-slate-200 overflow-hidden">
-              {/* Header */}
-              <div className="grid grid-cols-[1fr_1fr_90px_70px_32px] gap-2 px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <span className="text-xs font-medium text-slate-500">Variable name</span>
-                <span className="text-xs font-medium text-slate-500">Label shown to employee</span>
-                <span className="text-xs font-medium text-slate-500">Type</span>
-                <span className="text-xs font-medium text-slate-500">Required</span>
-                <span />
-              </div>
-
-              {inputs.map((row, idx) => (
-                <div
-                  key={idx}
-                  className="grid grid-cols-[1fr_1fr_90px_70px_32px] gap-2 px-3 py-2 border-b border-slate-100 last:border-0 items-center"
-                >
-                  <input 
-                    value={row.name}
-                    onChange={(e) => updateInputRow(idx, "name", e.target.value)}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm w-full font-mono focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                  <input 
-                    value={row.label}
-                    onChange={(e) => updateInputRow(idx, "label", e.target.value)}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  />
-                  <select
-                    value={row.type}
-                    onChange={(e) => updateInputRow(idx, "type", e.target.value)}
-                    className="rounded border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
-                  >
-                    <option value="number">number</option>
-                    <option value="text">text</option>
-                  </select>
-                  <div className="flex justify-center">
-                    <input
-                      type="checkbox"
-                      checked={row.required}
-                      onChange={(e) => updateInputRow(idx, "required", e.target.checked)}
-                      className="w-4 h-4 accent-brand-600"
-                    />
-                  </div>
-                  <button
-                    onClick={() => removeInputRow(idx)}
-                    disabled={inputs.length === 1}
-                    className="text-slate-300 hover:text-red-500 disabled:opacity-0 text-sm font-medium"
-                  >
-                    ✕
-                  </button>
-                </div>
-              ))}
-            </div>
-            <p className="text-xs text-slate-400 mt-1.5">
-              Variable names are used in the formula expression below. Use snake_case, no spaces.
-            </p>
-          </div>
-
-          {/* Formula */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">
-              Formula Expression
-            </label>
-            <textarea
-              value={expression}
-              onChange={(e) => setExpression(e.target.value)}
-              rows={2} 
-              className="w-full rounded-md border border-slate-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-brand-500"
-            />
-            <p className="text-xs text-slate-400 mt-1">
-              Use the variable names you defined above. Supports standard math operators and
-              functions (e.g. <code>sqrt</code>, <code>pow</code>, <code>abs</code>). You can
-              leave this blank and add the formula later.
-            </p>
-          </div>
-
-          {error && (
-            <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2">
-              {error}
-            </p>
-          )}
-
-          {/* Actions */}
-          <div className="flex gap-3 pt-1">
-            <button
-              onClick={() => handleCreate(false)}
-              disabled={creating || !name.trim()}
-              className="rounded-md border border-slate-300 text-slate-700 text-sm font-medium px-4 py-2 hover:bg-slate-50 disabled:opacity-50"
-            >
-              {creating ? "Saving..." : expression ? "Save as draft" : "Create (no formula yet)"}
-            </button>
-            {expression.trim() && (
-              <button
-                onClick={() => handleCreate(true)}
-                disabled={creating || !name.trim()}
-                className="rounded-md bg-brand-600 text-white text-sm font-medium px-4 py-2 hover:bg-brand-700 disabled:opacity-50"
-              >
-                {creating ? "Saving..." : "Create & Publish"}
-              </button>
-            )}
-          </div>
+      {!loading && categories.length === 0 && calculators.length === 0 && (
+        <div className="text-center py-12 bg-white border border-slate-200 rounded-lg">
+          <p className="text-sm text-slate-500">
+            No categories or calculators yet. Start by creating a category or a calculator.
+          </p>
         </div>
       )}
 
-      {/* ── Calculator list ─────────────────────────────────────── */}
-      {loading && <p className="text-sm text-slate-500">Loading...</p>}
-      {error && !showCreate && <p className="text-sm text-red-600 mb-4">{error}</p>}
+      {!loading && (
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={orderedCategories.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+            <div className="space-y-4">
+              {orderedCategories.map((cat) => {
+                const items = byContainer[cat.id] ?? [];
+                return (
+                  <SortableCategorySection
+                    key={cat.id}
+                    category={cat}
+                    count={items.length}
+                    onRename={handleRenameCategory}
+                    onDelete={handleDeleteCategory}
+                    onAddCalculator={openWizard}
+                  >
+                    <SortableContext items={items.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                      {items.length === 0 ? (
+                        <p className="px-3 py-4 text-xs text-slate-400 text-center">
+                          No calculators in this category yet.
+                        </p>
+                      ) : (
+                        items.map((calc) => (
+                          <SortableCalculatorRow
+                            key={calc.id}
+                            calc={calc}
+                            containerId={cat.id}
+                            categories={categories}
+                            onToggleActive={handleToggleActive}
+                            onDelete={handleDeleteCalculator}
+                            onMove={handleMoveCalculator}
+                          />
+                        ))
+                      )}
+                    </SortableContext>
+                  </SortableCategorySection>
+                );
+              })}
+            </div>
+          </SortableContext>
 
-      <div className="divide-y divide-slate-200 bg-white border border-slate-200 rounded-lg">
-        {!loading && calculators.length === 0 && (
-          <p className="px-5 py-8 text-sm text-slate-500 text-center">
-            No calculators yet. Create one above.
-          </p>
-        )}
-        {calculators.map((c) => (
-          <div key={c.id} className="px-5 py-4 flex items-center justify-between gap-4">
-            <div className="min-w-0">
-              <Link
-                to={`/admin/calculators/${c.id}`}
-                className="font-medium text-slate-900 hover:text-brand-700 truncate block"
-              >
-                {c.name}
-              </Link>
-              {c.description && (
-                <p className="text-sm text-slate-500 truncate">{c.description}</p>
-              )}
-            </div>
-            <div className="flex items-center gap-3 shrink-0">
-              <span
-                className={`text-xs px-2 py-1 rounded-full font-medium ${
-                  c.active
-                    ? "bg-green-100 text-green-700"
-                    : "bg-slate-100 text-slate-500"
-                }`}
-              >
-                {c.active ? "Active" : "Disabled"}
-              </span>
+          {/* Uncategorized bucket - always last, not itself sortable as a category */}
+          <div className="bg-white border border-slate-200 rounded-lg overflow-hidden mt-4">
+            <div className={`flex items-center gap-2 px-3 py-2 bg-slate-50 ${uncategorizedCollapsed ? "" : "border-b border-slate-200"}`}>
               <button
-                onClick={() => toggleActive(c)}
-                className="text-sm text-brand-600 hover:text-brand-700"
+                type="button"
+                onClick={() => setUncategorizedCollapsed((c) => !c)}
+                className="text-slate-400 hover:text-slate-600 p-0.5"
+                title={uncategorizedCollapsed ? "Expand" : "Collapse"}
               >
-                {c.active ? "Disable" : "Enable"}
+                <span
+                  className={`inline-block text-xs transition-transform ${uncategorizedCollapsed ? "-rotate-90" : ""}`}
+                >
+                  ▼
+                </span>
               </button>
+              <span className="text-sm font-semibold text-slate-600">Uncategorized</span>
+              <span className="text-xs text-slate-400">({uncategorized.length})</span>
+              <div className="flex-1" />
               <button
-                onClick={() => handleDelete(c)}
-                className="text-sm text-red-500 hover:text-red-700"
+                onClick={() => openWizard(null)}
+                className="text-xs text-brand-600 hover:text-brand-700 font-medium"
               >
-                Delete
+                + Add calculator
               </button>
             </div>
+            {!uncategorizedCollapsed && (
+              <SortableContext items={uncategorized.map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                {uncategorized.length === 0 ? (
+                  <p className="px-3 py-4 text-xs text-slate-400 text-center">
+                    No uncategorized calculators.
+                  </p>
+                ) : (
+                  uncategorized.map((calc) => (
+                    <SortableCalculatorRow
+                      key={calc.id}
+                      calc={calc}
+                      containerId={UNCATEGORIZED}
+                      categories={categories}
+                      onToggleActive={handleToggleActive}
+                      onDelete={handleDeleteCalculator}
+                      onMove={handleMoveCalculator}
+                    />
+                  ))
+                )}
+              </SortableContext>
+            )}
           </div>
-        ))}
-      </div>
+        </DndContext>
+      )}
+
+      {showWizard && (
+        <CreateCalculatorWizard
+          categories={categories}
+          defaultCategoryId={wizardDefaultCategory}
+          onClose={() => setShowWizard(false)}
+          onCreated={load}
+        />
+      )}
     </>
   );
 }

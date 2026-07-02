@@ -35,6 +35,39 @@ export interface FormulaValidationResult {
   variables?: string[];
 }
 
+// Symbols that should stay as mathjs constants, not user inputs.
+// Single-letter names like i, j, e are intentionally omitted — they're common
+// engineering variable names (e.g. current, voltage).
+const MATH_CONSTANTS = new Set(["pi", "PI", "tau", "Infinity", "NaN", "true", "false"]);
+
+function extractVariables(node: ReturnType<typeof math.parse>): string[] {
+  const symbols = new Set<string>();
+  const functionNames = new Set<string>();
+
+  node.traverse((n) => {
+    if (n.type === "FunctionNode") {
+      // @ts-expect-error mathjs node typing
+      const fn = n.fn;
+      if (fn?.type === "SymbolNode" && fn.name) {
+        functionNames.add(fn.name as string);
+      }
+    }
+    if (n.type === "SymbolNode") {
+      // @ts-expect-error mathjs node typing
+      const name = n.name as string;
+      if (name) symbols.add(name);
+    }
+  });
+
+  const variables = new Set<string>();
+  for (const name of symbols) {
+    if (functionNames.has(name)) continue;
+    if (MATH_CONSTANTS.has(name)) continue;
+    variables.add(name);
+  }
+  return Array.from(variables);
+}
+
 /**
  * Validates a formula expression without evaluating it against real data.
  * Used by the admin "create/update formula" endpoints before publishing.
@@ -59,18 +92,7 @@ export function validateFormula(expression: string): FormulaValidationResult {
       return { valid: false, error: rejected };
     }
 
-    const variables = new Set<string>();
-    node.traverse((n) => {
-      if (n.type === "SymbolNode") {
-        // @ts-expect-error mathjs node typing
-        const name = n.name as string;
-        if (name && !(name in math)) {
-          variables.add(name);
-        }
-      }
-    });
-
-    return { valid: true, variables: Array.from(variables) };
+    return { valid: true, variables: extractVariables(node) };
   } catch (err) {
     return { valid: false, error: err instanceof Error ? err.message : "Invalid expression." };
   }

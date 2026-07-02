@@ -8,6 +8,40 @@ export interface AuthUser {
   role: Role;
 }
 
+export interface EmployeeCalculator {
+  id: string;
+  name: string;
+  description: string | null;
+  result_unit: string | null;
+}
+
+export interface Category {
+  id: string;
+  name: string;
+  display_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AdminCalculator {
+  id: string;
+  name: string;
+  description: string | null;
+  active: boolean;
+  category_id: string | null;
+  category_name: string | null;
+  display_order: number;
+  result_unit: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FormulaValidation {
+  valid: boolean;
+  error?: string;
+  variables?: string[];
+}
+
 function getToken(): string | null {
   return sessionStorage.getItem("formula_calc_token");
 }
@@ -94,12 +128,18 @@ export const api = {
 
   // Employee endpoints
   listCalculators: () =>
-    request<{ calculators: { id: string; name: string; description: string | null }[] }>(
-      "/api/calculators"
-    ),
+    request<{
+      categories: {
+        id: string;
+        name: string;
+        display_order: number;
+        calculators: EmployeeCalculator[];
+      }[];
+      uncategorized: EmployeeCalculator[];
+    }>("/api/calculators"),
   getCalculator: (id: string) =>
     request<{
-      calculator: { id: string; name: string; description: string | null };
+      calculator: { id: string; name: string; description: string | null; result_unit: string | null };
       inputs: {
         id: string;
         name: string;
@@ -107,6 +147,7 @@ export const api = {
         type: "number" | "text";
         required: boolean;
         display_order: number;
+        unit: string | null;
       }[];
     }>(`/api/calculators/${id}`),
   calculate: (calculatorId: string, inputs: Record<string, number | string>) =>
@@ -127,11 +168,34 @@ export const api = {
     }>("/api/history"),
 
   // Admin endpoints
-  adminListCalculators: () => request<{ calculators: any[] }>("/api/admin/calculators"),
+  adminListCalculators: () => request<{ calculators: AdminCalculator[] }>("/api/admin/calculators"),
+  adminGetCalculator: (id: string) => request<{ calculator: AdminCalculator }>(`/api/admin/calculators/${id}`),
+  adminListCalculatorInputs: (calculatorId: string) =>
+    request<{
+      inputs: {
+        id: string;
+        name: string;
+        label: string;
+        type: "number" | "text";
+        required: boolean;
+        display_order: number;
+        unit: string | null;
+      }[];
+    }>(`/api/admin/calculators/${calculatorId}/inputs`),
+  adminUpdateCalculatorInputs: (
+    calculatorId: string,
+    inputs: { id: string; label?: string; unit?: string }[]
+  ) =>
+    request<{ inputs: { id: string; name: string; label: string; unit: string | null }[] }>(
+      `/api/admin/calculators/${calculatorId}/inputs`,
+      { method: "PUT", body: JSON.stringify({ inputs }) }
+    ),
   adminCreateCalculator: (payload: {
     name: string;
     description?: string;
-    inputs: { name: string; label: string; type: "number" | "text"; required: boolean; display_order: number }[];
+    category_id?: string | null;
+    result_unit?: string;
+    inputs: { name: string; label: string; type: "number" | "text"; required: boolean; display_order: number; unit?: string }[];
     expression?: string;
     publish?: boolean;
   }) =>
@@ -139,16 +203,35 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  adminUpdateCalculator: (id: string, payload: { name?: string; description?: string; active?: boolean }) =>
+  adminUpdateCalculator: (
+    id: string,
+    payload: {
+      name?: string;
+      description?: string;
+      active?: boolean;
+      category_id?: string | null;
+      result_unit?: string;
+    }
+  ) =>
     request<{ calculator: any }>(`/api/admin/calculators/${id}`, {
       method: "PUT",
       body: JSON.stringify(payload),
     }),
   adminDeleteCalculator: (id: string) =>
     request<void>(`/api/admin/calculators/${id}`, { method: "DELETE" }),
+  adminReorderCalculators: (categoryId: string | null, orderedIds: string[]) =>
+    request<{ ok: true }>("/api/admin/calculators/reorder", {
+      method: "POST",
+      body: JSON.stringify({ categoryId, orderedIds }),
+    }),
 
   adminListFormulaVersions: (calculatorId: string) =>
     request<{ formulaVersions: any[] }>(`/api/admin/calculators/${calculatorId}/formulas`),
+  adminValidateExpression: (expression: string) =>
+    request<FormulaValidation>("/api/admin/formulas/validate", {
+      method: "POST",
+      body: JSON.stringify({ expression }),
+    }),
   adminCreateFormula: (payload: { calculatorId: string; expression: string; publish: boolean }) =>
     request<{ formulaVersion: any }>("/api/admin/formulas", {
       method: "POST",
@@ -160,6 +243,25 @@ export const api = {
       body: JSON.stringify(payload),
     }),
   adminDeleteFormula: (id: string) => request<void>(`/api/admin/formulas/${id}`, { method: "DELETE" }),
+
+  // Category management
+  adminListCategories: () => request<{ categories: Category[] }>("/api/admin/categories"),
+  adminCreateCategory: (name: string) =>
+    request<{ category: Category }>("/api/admin/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    }),
+  adminUpdateCategory: (id: string, name: string) =>
+    request<{ category: Category }>(`/api/admin/categories/${id}`, {
+      method: "PUT",
+      body: JSON.stringify({ name }),
+    }),
+  adminDeleteCategory: (id: string) => request<void>(`/api/admin/categories/${id}`, { method: "DELETE" }),
+  adminReorderCategories: (orderedIds: string[]) =>
+    request<{ ok: true }>("/api/admin/categories/reorder", {
+      method: "POST",
+      body: JSON.stringify({ orderedIds }),
+    }),
 
   adminCalculationLogs: () => request<{ logs: any[] }>("/api/admin/logs/calculations"),
   adminAuditLogs: () => request<{ logs: any[] }>("/api/admin/logs/audit"),

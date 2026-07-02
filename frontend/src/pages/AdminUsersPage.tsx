@@ -56,8 +56,12 @@ export default function AdminUsersPage() {
 
   const handleDelete = async (u: UserRow) => {
     if (!confirm(`Remove ${u.email}? This cannot be undone.`)) return;
-    await api.adminDeleteUser(u.id);
-    load();
+    try {
+      await api.adminDeleteUser(u.id);
+      load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to delete user");
+    }
   };
 
   return (

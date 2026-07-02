@@ -1,7 +1,7 @@
 [package]
 name = "formula-calculator"
 version = "1.0.0"
-description = "Engineering Formula Calculator System desktop client"
+description = "Formula Calculator desktop client"
 edition = "2021"
 
 [build-dependencies]
